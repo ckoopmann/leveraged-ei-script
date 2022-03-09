@@ -4,10 +4,14 @@
 // When running the script with `npx hardhat run <script>` you'll find the Hardhat
 // Runtime Environment's members available in the global scope.
 import { ethers, network } from "hardhat";
+import { getPolygonSdk } from '@dethcrypto/eth-sdk-client'
 
 async function main() {
     const signers = await ethers.getSigners();
-    console.log("Signers", signers);
+    const defaultSigner = signers[0];
+
+    const polygonSdk = getPolygonSdk(defaultSigner)
+    console.log("UniV3Router", await polygonSdk.exchangeIssuanceLeveraged.uniV3Router())
 }
 
 // We recommend this pattern to be able to use async/await everywhere
