@@ -11,6 +11,7 @@ Run `yarn eth-sdk` to download abis / generate typechain artifacts for smart con
 
 # Configure
 Copy `.env.example` to `.env` and adjust environment variables inside to correct values.
+NEVER COMMIT / PUSH ANY PRIVATE KEY TO GITHUB (OR ALL OF YOUR FUNDS WILL BE LOST).
 
 # Test
 Run `yarn hardhat node` to run a local polygon fork.
