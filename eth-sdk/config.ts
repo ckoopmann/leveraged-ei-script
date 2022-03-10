@@ -7,7 +7,9 @@ export default defineConfig({
         polygon: {
             exchangeIssuanceLeveraged:
                 "0x600d9950c6ecAef98Cc42fa207E92397A6c43416",
+            aaveLeverageModule: "0xB7F72e15239197021480EB720E1495861A1ABdce",
             tokens: {
+                eth2xFli: "0x3Ad707dA309f3845cd602059901E39C4dcd66473",
                 weth: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",
                 usdc: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
             },
