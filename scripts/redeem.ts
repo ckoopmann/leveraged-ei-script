@@ -3,14 +3,18 @@
 //
 // When running the script with `npx hardhat run <script>` you'll find the Hardhat
 // Runtime Environment's members available in the global scope.
-import { ethers } from "hardhat";
+import { ethers, network } from "hardhat";
 import { getPolygonSdk } from "@dethcrypto/eth-sdk-client";
 import { AlphaRouter } from "@uniswap/smart-order-router";
+import { Token, CurrencyAmount, Percent, TradeType } from "@uniswap/sdk-core";
+import { BigNumber, getDefaultProvider, Wallet, Signer } from "ethers";
+import { getSwapDataCollateralForDebt, getSigner } from "./utils";
+import { Exchange } from "./types";
+import JSBI from "jsbi";
 import assert from "assert";
+import axios from "axios";
 import util from "util";
 import readline from "readline-sync";
-import { getSwapDataDebtForCollateral, getSigner } from "./utils";
-import { Exchange } from "./types";
 
 async function main() {
     const signer = await getSigner();
@@ -23,23 +27,28 @@ async function main() {
 
     const gasScalingFactor = 110;
 
-    // Hardcoded amount to issue TODO: Update / Check everytime you use
+    // Hardcoded amount to redeem TODO: Update / Check everytime you use
     const setAmount = 5;
     const setAmountWei = ethers.utils.parseEther(setAmount.toString());
-    const setTokenAddress = polygonSdk.tokens.eth2xFli.address;
-
-    // Calculation of maxAmountIn based on max price you want to pay in usd and usd price of input token
-    // Hardcoded max price to pay in usd TODO: Update / Check everytime you use
-    const setMaxPrice = 29;
-    // Hardcoded weth price in USD TODO: Update / Check everytime you use
-    const inputTokenPrice = 2580;
-    const inputTokenAddress = polygonSdk.tokens.weth.address;
-    const maxAmountIn = (setAmount * setMaxPrice) / inputTokenPrice;
-    console.log("maxAmountIn", maxAmountIn);
-    const maxAmountInWei = ethers.utils.parseEther(maxAmountIn.toString());
+    const setToken = polygonSdk.tokens.eth2xFli;
+    const setTokenAddress = setToken.address;
 
     const debtToken = polygonSdk.tokens.usdc;
     const collateralToken = polygonSdk.tokens.weth;
+    // Calculation of setAmount based on max price you want to pay in usd and usd price of input token
+    // Hardcoded max price to pay in usd TODO: Update / Check everytime you use
+    const setMinPrice = 23;
+    // Hardcoded weth price in USD TODO: Update / Check everytime you use
+    const outputTokenPrice = 2570;
+    const outputToken = collateralToken;
+    const outputTokenAddress = outputToken.address;
+    const outputTokenDecimals = await outputToken.decimals();
+    const minAmountOut = (setAmount * setMinPrice) / outputTokenPrice;
+    console.log("minAmountOut", minAmountOut);
+    const minAmountOutWei = ethers.utils.parseUnits(
+        minAmountOut.toString(),
+        outputTokenDecimals
+    );
 
     const chainId = 137;
 
@@ -59,7 +68,7 @@ async function main() {
     } = await polygonSdk.exchangeIssuanceLeveraged.getLeveragedTokenData(
         polygonSdk.tokens.eth2xFli.address,
         setAmountWei,
-        true
+        false
     );
 
     assert(debtTokenAddress === debtToken.address, "Debt token mismatch");
@@ -74,34 +83,39 @@ async function main() {
         provider: ethers.provider,
     };
     const router = new AlphaRouter(routerConfig);
-    const swapDataDebtForCollateral = await getSwapDataDebtForCollateral(
+    const swapDataCollateralForDebt = await getSwapDataCollateralForDebt(
         router,
         debtAmount,
         debtToken,
         collateralToken,
         signer
     );
-    console.log("swapDataDebtForCollateral", swapDataDebtForCollateral);
+    console.log("swapDataCollateralForDebt", swapDataCollateralForDebt);
 
     // Since we use the collateral as input  token we can leave this data empty
-    // TODO: Replace with swap data InputToken -> WETH if not paying in WETH
-    const swapDataInputToken = { path: [], fees: [] };
+    // TODO: Replace with swap data OutputToken -> WETH if not paying in WETH
+    const swapDataOutputToken = { path: [], fees: [] };
 
-    const inputBalance = await polygonSdk.tokens.weth.balanceOf(signer.address);
-    assert(inputBalance.gte(maxAmountInWei), "Not enough input token balance");
+    const setBalance = await setToken.balanceOf(signer.address);
+    console.log("setBalance", ethers.utils.formatEther(setBalance));
+    assert(setBalance.gte(setAmountWei), "Not enough set balance");
 
-    const allowance = await polygonSdk.tokens.weth.allowance(
+    const outputBalance = await outputToken.balanceOf(signer.address);
+
+
+    const allowance = await setToken.allowance(
         signer.address,
         polygonSdk.exchangeIssuanceLeveraged.address
     );
+
     console.log("Allowance", ethers.utils.formatEther(allowance));
-    if (allowance.lt(maxAmountInWei)) {
+    if (allowance.lt(setAmountWei)) {
         console.log(
             "Amount needed to approve",
-            ethers.utils.formatEther(maxAmountInWei)
+            ethers.utils.formatEther(setAmountWei)
         );
         const answer = readline.question(
-            "Do you want approve the exchange Issuance contract to spend your weth (press y to confirm or any other key to cancel)?"
+            "Do you want approve the exchange Issuance contract to spend your token (press y to confirm or any other key to cancel)?"
         );
 
         if (answer !== "y") {
@@ -109,9 +123,9 @@ async function main() {
             process.exit(1);
         }
         console.log("Approving");
-        const approveTx = await polygonSdk.tokens.weth.approve(
+        const approveTx = await setToken.approve(
             polygonSdk.exchangeIssuanceLeveraged.address,
-            maxAmountInWei,
+            setAmountWei,
             { gasPrice }
         );
         console.log("Approve Tx", approveTx.hash);
@@ -119,34 +133,18 @@ async function main() {
         console.log("Approved");
     }
 
-    console.log("Estimating gas");
-    const gasEstimate =
-        await polygonSdk.exchangeIssuanceLeveraged.estimateGas.issueExactSetFromERC20(
-            setTokenAddress,
-            setAmountWei,
-            inputTokenAddress,
-            maxAmountInWei,
-            Exchange.UniV3,
-            swapDataDebtForCollateral,
-            swapDataInputToken
-        );
-    const gasLimit = gasEstimate.mul(gasScalingFactor).div(100);
-    const gasCostEstimate = ethers.utils.formatEther(gasEstimate.mul(gasPrice));
-    const gasCostLimit = ethers.utils.formatEther(gasLimit.mul(gasPrice));
     const metaData = {
-        setMaxPrice,
-        inputTokenPrice,
-        gasCostEstimate,
-        gasCostLimit,
-        inputTokenBalance: ethers.utils.formatEther(inputBalance),
+        setMinPrice,
+        outputTokenPrice,
+        setBalance: ethers.utils.formatEther(setBalance),
         from: signer.address,
         arguments: {
             setTokenAddress,
             setAmount: ethers.utils.formatEther(setAmountWei),
-            inputTokenAddress,
-            maxAmountIn: ethers.utils.formatEther(maxAmountInWei),
-            swapDataDebtForCollateral,
-            swapDataInputToken,
+            outputTokenAddress,
+            minAmountOut: ethers.utils.formatEther(minAmountOutWei),
+            swapDataCollateralForDebt,
+            swapDataOutputToken,
         },
     };
     console.log(
@@ -154,33 +152,53 @@ async function main() {
         util.inspect(metaData, { showHidden: false, depth: null, colors: true })
     );
 
+    console.log("Estimating gas");
+    const gasEstimate =
+        await polygonSdk.exchangeIssuanceLeveraged.estimateGas.redeemExactSetForERC20(
+            setTokenAddress,
+            setAmountWei,
+            outputTokenAddress,
+            minAmountOutWei,
+            Exchange.UniV3,
+            swapDataCollateralForDebt,
+            swapDataOutputToken
+        );
+    const gasLimit = gasEstimate.mul(gasScalingFactor).div(100);
+    const gasCostEstimate = ethers.utils.formatEther(gasEstimate.mul(gasPrice));
+    const gasCostLimit = ethers.utils.formatEther(gasLimit.mul(gasPrice));
+    console.log("Gas", { gasCostEstimate, gasCostLimit });
+
     const answer = readline.question(
-        "Do you want to continue and issue (press y to confirm or any other key to cancel)?"
+        "Do you want to continue and redeem (press y to confirm or any other key to cancel)?"
     );
     if (answer !== "y") {
         console.log("Aborting");
         process.exit(1);
     }
 
-    const issueTx =
-        await polygonSdk.exchangeIssuanceLeveraged.issueExactSetFromERC20(
+    const redeemTx =
+        await polygonSdk.exchangeIssuanceLeveraged.redeemExactSetForERC20(
             setTokenAddress,
             setAmountWei,
-            inputTokenAddress,
-            maxAmountInWei,
+            outputTokenAddress,
+            minAmountOutWei,
             Exchange.UniV3,
-            swapDataDebtForCollateral,
-            swapDataInputToken,
+            swapDataCollateralForDebt,
+            swapDataOutputToken,
             { gasPrice, gasLimit }
         );
-    console.log("issueTx", issueTx.hash);
-    await issueTx.wait();
+    console.log("redeemTx", redeemTx.hash);
+    await redeemTx.wait();
 
-    const inputBalanceAfter = await polygonSdk.tokens.weth.balanceOf(
-        signer.address
+    const outputBalanceAfter = await outputToken.balanceOf(signer.address);
+    const outputTokenReceived = outputBalanceAfter.sub(outputBalance);
+    console.log(
+        "Output token received",
+        ethers.utils.formatUnits(
+            outputTokenReceived,
+            await outputToken.decimals()
+        )
     );
-    const inputTokenSpent = inputBalance.sub(inputBalanceAfter);
-    console.log("Input token spent", ethers.utils.formatEther(inputTokenSpent));
 }
 
 // We recommend this pattern to be able to use async/await everywhere

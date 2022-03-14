@@ -71,32 +71,52 @@ export async function getTokenPathAndFees(
 export async function getSwapDataDebtForCollateral(
     router: AlphaRouter,
     debtAmount: BigNumber,
+    debtToken: any,
+    collateralToken: any,
     signer: any
 ) {
-    const polygonSdk = getPolygonSdk(signer);
-    const weth = new Token(
-        137,
-        polygonSdk.tokens.weth.address,
-        18,
-        "weth",
-        "wrapped ether"
-    );
-    const usdc = new Token(
-        137,
-        polygonSdk.tokens.usdc.address,
-        6,
-        "usdc",
-        "usd//c"
-    );
+    const collateralTokenData = await getTokenData(collateralToken);
+    const debtTokenData = await getTokenData(debtToken);
 
     return getTokenPathAndFees(
         router,
         debtAmount.toString(),
-        usdc,
-        weth,
+        debtTokenData,
+        collateralTokenData,
         signer
     );
 }
+
+export async function getSwapDataCollateralForDebt(
+    router: AlphaRouter,
+    debtAmount: BigNumber,
+    debtToken: any,
+    collateralToken: any,
+    signer: any
+) {
+    const collateralTokenData = await getTokenData(collateralToken);
+    const debtTokenData = await getTokenData(debtToken);
+
+    return getTokenPathAndFees(
+        router,
+        debtAmount.toString(),
+        collateralTokenData,
+        debtTokenData,
+        signer,
+        false
+    );
+}
+
+async function getTokenData(token: any) {
+    return new Token(
+        137,
+        token.address,
+        await token.decimals(),
+        await token.symbol(),
+        await token.name()
+    );
+}
+
 
 export async function getSigner() {
     if (process.env.USE_PRIVATE_KEY) {
