@@ -6,7 +6,7 @@ import "@nomiclabs/hardhat-ethers";
 
 dotenv.config();
 
-const TIMEOUT = 60 * 1000;
+const TIMEOUT = 5 * 60 * 1000;
 const polygonConfig = {
     url: process.env.POLYGON_URL || "",
     timeout: TIMEOUT,
