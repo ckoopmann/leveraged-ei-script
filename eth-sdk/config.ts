@@ -6,7 +6,7 @@ export default defineConfig({
     contracts: {
         polygon: {
             exchangeIssuanceLeveraged:
-                "0x600d9950c6ecAef98Cc42fa207E92397A6c43416",
+                "0x783f299588Ae89E9f44B230D6cd8E349FD01b16e",
             aaveLeverageModule: "0xB7F72e15239197021480EB720E1495861A1ABdce",
             tokens: {
                 eth2xFli: "0x3Ad707dA309f3845cd602059901E39C4dcd66473",
