@@ -8,7 +8,7 @@ import { getPolygonSdk } from "@dethcrypto/eth-sdk-client";
 import { AlphaRouter } from "@uniswap/smart-order-router";
 import { Token, CurrencyAmount, Percent, TradeType } from "@uniswap/sdk-core";
 import { BigNumber, getDefaultProvider, Wallet, Signer } from "ethers";
-import { getSwapDataCollateralForDebt, getSigner } from "./utils";
+import { getSwapData, getSigner } from "./utils";
 import { Exchange } from "./types";
 import JSBI from "jsbi";
 import assert from "assert";
@@ -28,19 +28,31 @@ async function main() {
     const gasScalingFactor = 110;
 
     // Hardcoded amount to redeem TODO: Update / Check everytime you use
-    const setAmount = 5;
+    const setAmount = 0.2;
     const setAmountWei = ethers.utils.parseEther(setAmount.toString());
-    const setToken = polygonSdk.tokens.eth2xFli;
+    const setToken = polygonSdk.tokens.iEthFli;
     const setTokenAddress = setToken.address;
 
-    const debtToken = polygonSdk.tokens.usdc;
-    const collateralToken = polygonSdk.tokens.weth;
+    const {
+        debtToken: debtTokenAddress,
+        collateralToken: collateralTokenAddress,
+        debtAmount,
+    } = await polygonSdk.exchangeIssuanceLeveraged.getLeveragedTokenData(
+        setTokenAddress,
+        setAmountWei,
+        true
+    );
+    const debtToken = polygonSdk.tokens.weth.attach(debtTokenAddress);
+    const collateralToken = polygonSdk.tokens.weth.attach(
+        collateralTokenAddress
+    );
+
     // Calculation of setAmount based on max price you want to pay in usd and usd price of input token
     // Hardcoded max price to pay in usd TODO: Update / Check everytime you use
-    const setMinPrice = 23;
+    const setMinPrice = 110;
     // Hardcoded weth price in USD TODO: Update / Check everytime you use
     const outputTokenPrice = 2570;
-    const outputToken = collateralToken;
+    const outputToken = polygonSdk.tokens.weth;
     const outputTokenAddress = outputToken.address;
     const outputTokenDecimals = await outputToken.decimals();
     const minAmountOut = (setAmount * setMinPrice) / outputTokenPrice;
@@ -61,21 +73,6 @@ async function main() {
 
     console.log("Gas Price:", ethers.utils.formatUnits(gasPrice, "gwei"));
 
-    const {
-        debtToken: debtTokenAddress,
-        collateralToken: collateralTokenAddress,
-        debtAmount,
-    } = await polygonSdk.exchangeIssuanceLeveraged.getLeveragedTokenData(
-        polygonSdk.tokens.eth2xFli.address,
-        setAmountWei,
-        false
-    );
-
-    assert(debtTokenAddress === debtToken.address, "Debt token mismatch");
-    assert(
-        collateralTokenAddress === collateralToken.address,
-        "Collateral token mismatch"
-    );
 
     // Get swap data for uniV3 swap from debt to collateral token (USDC -> WETH);
     const routerConfig = {
@@ -83,25 +80,39 @@ async function main() {
         provider: ethers.provider,
     };
     const router = new AlphaRouter(routerConfig);
-    const swapDataCollateralForDebt = await getSwapDataCollateralForDebt(
+    const swapDataCollateralForDebt = await getSwapData(
         router,
         debtAmount,
-        debtToken,
         collateralToken,
-        signer
+        debtToken,
+        signer,
+        false
     );
     console.log("swapDataCollateralForDebt", swapDataCollateralForDebt);
 
     // Since we use the collateral as input  token we can leave this data empty
     // TODO: Replace with swap data OutputToken -> WETH if not paying in WETH
-    const swapDataOutputToken = { path: [], fees: [] };
+    let swapDataOutputToken: { path: string[]; fees: number[] } = {
+        path: [],
+        fees: [],
+    };
+    if (outputTokenAddress !== collateralTokenAddress) {
+        swapDataOutputToken = await getSwapData(
+            router,
+            minAmountOutWei,
+            collateralToken,
+            outputToken,
+            signer,
+            false
+        );
+    }
+    console.log("swapDataOutputToken", swapDataOutputToken);
 
     const setBalance = await setToken.balanceOf(signer.address);
     console.log("setBalance", ethers.utils.formatEther(setBalance));
     assert(setBalance.gte(setAmountWei), "Not enough set balance");
 
     const outputBalance = await outputToken.balanceOf(signer.address);
-
 
     const allowance = await setToken.allowance(
         signer.address,

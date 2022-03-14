@@ -9,7 +9,7 @@ import { AlphaRouter } from "@uniswap/smart-order-router";
 import assert from "assert";
 import util from "util";
 import readline from "readline-sync";
-import { getSwapDataDebtForCollateral, getSigner } from "./utils";
+import { getSwapData, getSigner } from "./utils";
 import { Exchange } from "./types";
 
 async function main() {
@@ -24,22 +24,35 @@ async function main() {
     const gasScalingFactor = 110;
 
     // Hardcoded amount to issue TODO: Update / Check everytime you use
-    const setAmount = 5;
+    const setAmount = 1;
     const setAmountWei = ethers.utils.parseEther(setAmount.toString());
-    const setTokenAddress = polygonSdk.tokens.eth2xFli.address;
+    const setToken= polygonSdk.tokens.iBtcFli;
+    const setTokenAddress = setToken.address;
 
     // Calculation of maxAmountIn based on max price you want to pay in usd and usd price of input token
     // Hardcoded max price to pay in usd TODO: Update / Check everytime you use
-    const setMaxPrice = 29;
+    const setMaxPrice = 120;
     // Hardcoded weth price in USD TODO: Update / Check everytime you use
-    const inputTokenPrice = 2580;
-    const inputTokenAddress = polygonSdk.tokens.weth.address;
+    const inputToken = polygonSdk.tokens.weth;
+    const inputTokenAddress = inputToken.address;
+    const inputTokenPrice = 2600;
     const maxAmountIn = (setAmount * setMaxPrice) / inputTokenPrice;
     console.log("maxAmountIn", maxAmountIn);
-    const maxAmountInWei = ethers.utils.parseEther(maxAmountIn.toString());
+    const maxAmountInWei = ethers.utils.parseUnits(maxAmountIn.toString(), await inputToken.decimals());
 
-    const debtToken = polygonSdk.tokens.usdc;
-    const collateralToken = polygonSdk.tokens.weth;
+    const {
+        debtToken: debtTokenAddress,
+        collateralToken: collateralTokenAddress,
+        debtAmount,
+    } = await polygonSdk.exchangeIssuanceLeveraged.getLeveragedTokenData(
+        setTokenAddress,
+        setAmountWei,
+        true
+    );
+    const debtToken = polygonSdk.tokens.weth.attach(debtTokenAddress);
+    const collateralToken = polygonSdk.tokens.weth.attach(
+        collateralTokenAddress
+    );
 
     const chainId = 137;
 
@@ -51,16 +64,6 @@ async function main() {
     const gasPrice = ethers.utils.parseUnits("60", "gwei");
 
     console.log("Gas Price:", ethers.utils.formatUnits(gasPrice, "gwei"));
-
-    const {
-        debtToken: debtTokenAddress,
-        collateralToken: collateralTokenAddress,
-        debtAmount,
-    } = await polygonSdk.exchangeIssuanceLeveraged.getLeveragedTokenData(
-        polygonSdk.tokens.eth2xFli.address,
-        setAmountWei,
-        true
-    );
 
     assert(debtTokenAddress === debtToken.address, "Debt token mismatch");
     assert(
@@ -74,7 +77,7 @@ async function main() {
         provider: ethers.provider,
     };
     const router = new AlphaRouter(routerConfig);
-    const swapDataDebtForCollateral = await getSwapDataDebtForCollateral(
+    const swapDataDebtForCollateral = await getSwapData(
         router,
         debtAmount,
         debtToken,
@@ -84,13 +87,25 @@ async function main() {
     console.log("swapDataDebtForCollateral", swapDataDebtForCollateral);
 
     // Since we use the collateral as input  token we can leave this data empty
-    // TODO: Replace with swap data InputToken -> WETH if not paying in WETH
-    const swapDataInputToken = { path: [], fees: [] };
+    let swapDataInputToken: { path: string[]; fees: number[] } = {
+        path: [],
+        fees: [],
+    };
+    if (inputTokenAddress !== collateralTokenAddress) {
+        swapDataInputToken = await getSwapData(
+            router,
+            maxAmountInWei,
+            inputToken,
+            collateralToken,
+            signer
+        );
+    }
+    console.log("swapDataInputToken", swapDataInputToken);
 
-    const inputBalance = await polygonSdk.tokens.weth.balanceOf(signer.address);
+    const inputBalance = await inputToken.balanceOf(signer.address);
     assert(inputBalance.gte(maxAmountInWei), "Not enough input token balance");
 
-    const allowance = await polygonSdk.tokens.weth.allowance(
+    const allowance = await inputToken.allowance(
         signer.address,
         polygonSdk.exchangeIssuanceLeveraged.address
     );
@@ -98,10 +113,10 @@ async function main() {
     if (allowance.lt(maxAmountInWei)) {
         console.log(
             "Amount needed to approve",
-            ethers.utils.formatEther(maxAmountInWei)
+            ethers.utils.formatUnits(maxAmountInWei, await inputToken.decimals())
         );
         const answer = readline.question(
-            "Do you want approve the exchange Issuance contract to spend your weth (press y to confirm or any other key to cancel)?"
+            "Do you want approve the exchange Issuance contract to spend your tokens (press y to confirm or any other key to cancel)?"
         );
 
         if (answer !== "y") {
@@ -109,7 +124,7 @@ async function main() {
             process.exit(1);
         }
         console.log("Approving");
-        const approveTx = await polygonSdk.tokens.weth.approve(
+        const approveTx = await inputToken.approve(
             polygonSdk.exchangeIssuanceLeveraged.address,
             maxAmountInWei,
             { gasPrice }
@@ -134,6 +149,7 @@ async function main() {
     const gasCostEstimate = ethers.utils.formatEther(gasEstimate.mul(gasPrice));
     const gasCostLimit = ethers.utils.formatEther(gasLimit.mul(gasPrice));
     const metaData = {
+        setToken: await setToken.name(),
         setMaxPrice,
         inputTokenPrice,
         gasCostEstimate,

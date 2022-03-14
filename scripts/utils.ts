@@ -68,44 +68,27 @@ export async function getTokenPathAndFees(
     return { path, fees };
 }
 
-export async function getSwapDataDebtForCollateral(
+export async function getSwapData(
     router: AlphaRouter,
     debtAmount: BigNumber,
-    debtToken: any,
-    collateralToken: any,
-    signer: any
+    inputToken: any,
+    outputToken: any,
+    signer: any,
+    isExactInput: boolean = true,
 ) {
-    const collateralTokenData = await getTokenData(collateralToken);
-    const debtTokenData = await getTokenData(debtToken);
+    const inputTokenData = await getTokenData(inputToken);
+    const outputTokenData = await getTokenData(outputToken);
 
     return getTokenPathAndFees(
         router,
         debtAmount.toString(),
-        debtTokenData,
-        collateralTokenData,
-        signer
-    );
-}
-
-export async function getSwapDataCollateralForDebt(
-    router: AlphaRouter,
-    debtAmount: BigNumber,
-    debtToken: any,
-    collateralToken: any,
-    signer: any
-) {
-    const collateralTokenData = await getTokenData(collateralToken);
-    const debtTokenData = await getTokenData(debtToken);
-
-    return getTokenPathAndFees(
-        router,
-        debtAmount.toString(),
-        collateralTokenData,
-        debtTokenData,
+        inputTokenData,
+        outputTokenData,
         signer,
-        false
+        isExactInput
     );
 }
+
 
 async function getTokenData(token: any) {
     return new Token(
